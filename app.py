@@ -57,23 +57,30 @@ def find_best_match(query, questions):
     return questions[best_idx] if sims[best_idx] > 0.5 else None
 
 # ========== Streamlit App ==========
-st.title("QSR CEO Bot")
-uploaded_file = st.file_uploader("Upload Final Cleaned CSV", type=["csv"])
+st.title("📊 QSR CEO Performance Bot")
+
+uploaded_file = st.file_uploader(
+    "📁 Upload your cleaned 50-month QSR dataset (optional)", 
+    type=["csv"],
+    help="If no file is uploaded, the default dataset (final_cleaned_50_months.csv) will be used."
+)
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
+    st.success("✅ Using uploaded file")
 else:
     df = load_default_csv()
+    st.info("📊 Using default dataset: final_cleaned_50_months.csv")
 
-query = st.text_input("Ask a question about store performance")
+query = st.text_input("🧠 Ask a question about store performance:")
 
 if query:
-    with st.spinner("Analyzing..."):
+    with st.spinner("Analyzing your question..."):
         answer_df = compute_metric(df, query)
         if answer_df is not None:
-            st.write("Structured Answer:")
+            st.write("📈 Structured Answer:")
             st.dataframe(answer_df)
         else:
             fallback = gpt_fallback(query, df.head(20).to_string())
-            st.write("GPT Answer:")
+            st.write("🤖 GPT Answer:")
             st.markdown(fallback)
