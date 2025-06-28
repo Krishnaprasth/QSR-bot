@@ -1,7 +1,5 @@
-
 streamlit
 pandas
-openai
 numpy
+openai
 scikit-learn
-faiss-cpu
