@@ -1,41 +1,79 @@
 import streamlit as st
 import pandas as pd
-from logic.metrics_engine import compute_metric
-from logic.cohort_logic import analyze_store_cohort
-from logic.counterfactuals import run_counterfactual_analysis
-from logic.semantic_router import semantic_router
-from utils.helpers import extract_available_months
+import numpy as np
+import openai
+from datetime import datetime
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 st.set_page_config(page_title="QSR CEO Bot", layout="wide")
-st.title("QSR CEO Bot")
 
+# ========== Load Data ==========
 @st.cache_data
-def load_data():
+def load_default_csv():
     return pd.read_csv("final_cleaned_50_months.csv")
 
-# Load the pre-cleaned dataset
-df = load_data()
+# ========== GPT Fallback ==========
+def gpt_fallback(query, context):
+    prompt = f"You are a QSR CEO bot. Answer the following based on the data context:\n{context}\n\nQuestion: {query}"
+    try:
+        openai.api_key = st.secrets["openai_api_key"]
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a QSR performance analysis bot."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response['choices'][0]['message']['content']
+    except Exception as e:
+        return f"GPT fallback failed: {e}"
 
-# Show history of queries and answers in sidebar
-if "history" not in st.session_state:
-    st.session_state.history = []
+# ========== Metric Engine ==========
+def compute_metric(df, query):
+    if "net sales" in query.lower():
+        result = df.groupby("Month")["Net Sales"].sum().reset_index()
+        return result
+    return None
 
-with st.sidebar:
-    st.subheader("Query History")
-    for i, (q, a) in enumerate(st.session_state.history):
-        st.markdown(f"**Q{i+1}:** {q}")
-        st.markdown(f"{a}")
-    if st.button("Clear History"):
-        st.session_state.history = []
+# ========== Cohort Logic ==========
+def analyze_store_cohort(df):
+    df['Open Month'] = df.groupby('Store')['Month'].transform('min')
+    cohort_perf = df.groupby('Open Month')['Net Sales'].mean().reset_index()
+    return cohort_perf
 
-# Main chat interface
-query = st.text_input("Ask your question about store performance:")
+# ========== Counterfactual ==========
+def simulate_counterfactual(df, store, metric, factor):
+    store_df = df[df["Store"] == store].copy()
+    store_df[metric] *= factor
+    return store_df
+
+# ========== Semantic Match ==========
+def find_best_match(query, questions):
+    vectorizer = TfidfVectorizer()
+    tfidf = vectorizer.fit_transform([query] + questions)
+    sims = cosine_similarity(tfidf[0:1], tfidf[1:]).flatten()
+    best_idx = np.argmax(sims)
+    return questions[best_idx] if sims[best_idx] > 0.5 else None
+
+# ========== Streamlit App ==========
+st.title("QSR CEO Bot")
+uploaded_file = st.file_uploader("Upload Final Cleaned CSV", type=["csv"])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+else:
+    df = load_default_csv()
+
+query = st.text_input("Ask a question about store performance")
 
 if query:
-    try:
-        response = semantic_router(query, df)
-    except Exception as e:
-        response = f"❌ Error: {str(e)}"
-
-    st.write(response)
-    st.session_state.history.append((query, response))
+    with st.spinner("Analyzing..."):
+        answer_df = compute_metric(df, query)
+        if answer_df is not None:
+            st.write("Structured Answer:")
+            st.dataframe(answer_df)
+        else:
+            fallback = gpt_fallback(query, df.head(20).to_string())
+            st.write("GPT Answer:")
+            st.markdown(fallback)
