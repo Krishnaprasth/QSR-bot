@@ -2,8 +2,6 @@
 import streamlit as st
 import pandas as pd
 import openai
-import chromadb
-from sentence_transformers import SentenceTransformer
 import numpy as np
 
 # --- Configurations ---
@@ -17,23 +15,15 @@ def load_data():
 
 df = load_data()
 
-# --- Initialize Embeddings + ChromaDB ---
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-chroma_client = chromadb.Client()
-collection_name = "qsr_ceo_questions"
-
-if collection_name not in chroma_client.list_collections():
-    chroma_client.create_collection(name=collection_name)
-collection = chroma_client.get_collection(name=collection_name)
-
 # --- OpenAI Setup ---
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # --- GPT Fallback Function ---
-def gpt_fallback(question: str, context: str) -> str:
+def gpt_fallback(question: str) -> str:
+    context_snippet = df.head(5).to_csv(index=False)
     messages = [
-        {"role": "system", "content": "You are a helpful performance analytics bot for a QSR chain."},
-        {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"}
+        {"role": "system", "content": "You are a helpful performance analytics bot for a QSR chain. You answer using only factual data."},
+        {"role": "user", "content": f"Here is a sample of the data:\n{context_snippet}\n\nQuestion:\n{question}"}
     ]
     response = openai.ChatCompletion.create(
         model="gpt-4",
@@ -66,16 +56,10 @@ if query:
         st.success("Answered using logic engine")
         st.dataframe(response)
     else:
-        # Vector Search from ChromaDB
-        query_vec = embedder.encode([query])[0].tolist()
-        results = collection.query(query_embeddings=[query_vec], n_results=5)
-        context = "\n".join(results.get("documents", [])[0]) if results.get("documents") else ""
-
-        gpt_response = gpt_fallback(query, context)
+        gpt_response = gpt_fallback(query)
         st.info("Answered using GPT fallback")
         st.markdown(gpt_response)
 
-    # Store query history
     if "history" not in st.session_state:
         st.session_state.history = []
     st.session_state.history.append((query, response if response is not None else gpt_response))
@@ -84,9 +68,3 @@ if query:
 with st.sidebar:
     st.subheader("Query History")
     if "history" in st.session_state:
-        for q, a in reversed(st.session_state.history):
-            st.markdown(f"**Q:** {q}")
-            if isinstance(a, pd.DataFrame):
-                st.dataframe(a)
-            else:
-                st.markdown(f"**A:** {a}")
