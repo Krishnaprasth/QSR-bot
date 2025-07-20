@@ -68,3 +68,9 @@ if query:
 with st.sidebar:
     st.subheader("Query History")
     if "history" in st.session_state:
+        for q, a in reversed(st.session_state.history):
+            st.markdown(f"**Q:** {q}")
+            if isinstance(a, pd.DataFrame):
+                st.dataframe(a)
+            else:
+                st.markdown(f"**A:** {a}")
