@@ -1,5 +1,4 @@
 streamlit
 pandas
-openai
-sentence-transformers
 numpy
+openai>=1.1.0
