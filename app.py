@@ -8,7 +8,7 @@ import os
 st.title("QSR CEO Bot MVP")
 
 # Try loading committed CSV first
-DATA_PATH = "data/qsr_data.csv"
+DATA_PATH = "data/sales_data.csv"
 if os.path.exists(DATA_PATH):
     df = pd.read_csv(DATA_PATH)
 else:
