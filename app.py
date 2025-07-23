@@ -1,69 +1,112 @@
 import streamlit as st
 import pandas as pd
-from query_router import route_query
+import numpy as np
 import matplotlib.pyplot as plt
-from io import BytesIO
-from fpdf import FPDF
+import io
+import os
 
-st.set_page_config(page_title="QSR CEO Bot", layout="wide")
-st.title("QSR CEO Performance Bot")
+st.title("QSR CEO Bot MVP")
 
-@st.cache_data
-def load_data():
-    return pd.read_csv("QSR_CEO_CLEANED_FY22_TO_FY26_FULL_FINAL.csv")
+# Try loading committed CSV first
+DATA_PATH = "data/qsr_data.csv"
+if os.path.exists(DATA_PATH):
+    df = pd.read_csv(DATA_PATH)
+else:
+    uploaded_file = st.file_uploader("Upload cleaned QSR dataset (CSV)", type=["csv"])
+    if not uploaded_file:
+        st.info("Either commit your CSV to `data/qsr_data.csv` or upload it here.")
+        st.stop()
+    df = pd.read_csv(uploaded_file)
 
-df = load_data()
+df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+df = df.dropna(subset=['Amount'])
 
-# Download helpers
-def convert_df_to_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Results')
-    output.seek(0)
-    return output
+# Filters
+stores = st.multiselect(
+    "Select Stores",
+    sorted(df['Store'].unique()),
+    default=list(df['Store'].unique())
+)
+fy = st.selectbox("Select Financial Year", sorted(df['FY'].unique()))
+metric_options = [
+    "Net Sales", "Rent", "Labor Cost", "CAM",
+    "Utility Cost", "Aggregator commission", "Marketing & advertisement"
+]
+metric = st.selectbox("Select Metric for Trend", metric_options)
 
-def convert_df_to_csv(df):
-    return df.to_csv(index=False).encode('utf-8')
+filtered = df[(df['Store'].isin(stores)) & (df['FY'] == fy)]
 
-def convert_df_to_txt(df):
-    return df.to_string(index=False).encode('utf-8')
+# Pivot & KPIs
+pivot = (
+    filtered
+    .pivot_table(index=['Store','Month'], columns='Metric', values='Amount', aggfunc='sum')
+    .fillna(0)
+)
+pivot['Rent/Sales %']       = pivot['Rent']       / pivot['Net Sales'].replace(0, np.nan) * 100
+pivot['Labor/Sales %']      = pivot['Labor Cost'] / pivot['Net Sales'].replace(0, np.nan) * 100
+pivot['CAM/Sales %']        = pivot['CAM']        / pivot['Net Sales'].replace(0, np.nan) * 100
+pivot['Utility/Sales %']    = pivot['Utility Cost']/ pivot['Net Sales'].replace(0, np.nan) * 100
+pivot['Aggregator/Sales %'] = pivot['Aggregator commission'] / pivot['Net Sales'].replace(0, np.nan) * 100
+pivot['Marketing/Sales %']  = pivot['Marketing & advertisement'] / pivot['Net Sales'].replace(0, np.nan) * 100
 
-def convert_df_to_pdf(df):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=10)
-    col_width = pdf.w / (len(df.columns) + 1)
-    row_height = 10
-    for col in df.columns:
-        pdf.cell(col_width, row_height, col, border=1)
-    pdf.ln(row_height)
-    for _, row in df.iterrows():
-        for item in row:
-            pdf.cell(col_width, row_height, str(item), border=1)
-        pdf.ln(row_height)
-    output = BytesIO()
-    pdf.output(output)
-    output.seek(0)
-    return output
+pivot['Contribution Margin'] = (
+    pivot['Net Sales']
+    - (
+        pivot['Rent'] +
+        pivot['Labor Cost'] +
+        pivot['CAM'] +
+        pivot['Utility Cost'] +
+        pivot['Aggregator commission'] +
+        pivot['Marketing & advertisement']
+      )
+)
 
-query = st.text_input("Ask a performance question:")
+# Same Store Sales Growth (YoY)
+years = sorted(df['FY'].unique())
+sssg = None
+if len(years) >= 2:
+    base_year    = years[-2]
+    compare_year = years[-1]
+    base = (
+        df[(df['FY'] == base_year) & (df['Metric'] == 'Net Sales')]
+        .groupby('Store')['Amount'].sum()
+    )
+    comp = (
+        df[(df['FY'] == compare_year) & (df['Metric'] == 'Net Sales')]
+        .groupby('Store')['Amount'].sum()
+    )
+    common_stores = base.index.intersection(comp.index)
+    sssg = ((comp.loc[common_stores] - base.loc[common_stores]) / base.loc[common_stores]) * 100
+    sssg = sssg.sort_values(ascending=False)
 
-if query:
-    response = route_query(query, df)
-    if response is not None:
-        st.success("Answered via logic engine")
-        st.dataframe(response)
+# Display
+st.subheader("Cost Ratios & Contribution Margin")
+st.dataframe(pivot.reset_index())
 
-        # Visualizations
-        if "Month-Year" in response.columns and "Amount (in lakhs)" in response.columns:
-            st.line_chart(response.set_index("Month-Year"))
-        elif "Store" in response.columns and "Amount (in lakhs)" in response.columns:
-            st.bar_chart(response.set_index("Store"))
+if sssg is not None:
+    st.subheader("Same Store Sales Growth (YoY)")
+    st.table(sssg)
 
-        # Download buttons
-        st.download_button("📥 Excel", convert_df_to_excel(response), "output.xlsx")
-        st.download_button("📄 CSV", convert_df_to_csv(response), "output.csv")
-        st.download_button("📝 Text", convert_df_to_txt(response), "output.txt")
-        st.download_button("📘 PDF", convert_df_to_pdf(response), "output.pdf")
-    else:
-        st.warning("Query not recognized. Please rephrase or refine.")
+st.subheader(f"{metric} Trend")
+trend = (
+    filtered[filtered['Metric'] == metric]
+    .groupby('Month')['Amount']
+    .sum()
+)
+fig, ax = plt.subplots()
+trend.plot(ax=ax, marker='o')
+ax.set_title(f"{metric} Trend ({fy})")
+ax.set_ylabel("Amount (Lakhs)")
+ax.set_xlabel("Month")
+plt.xticks(rotation=45)
+st.pyplot(fig)
+
+# Download Excel
+buffer = io.BytesIO()
+pivot.to_excel(buffer, index=True, engine='openpyxl')
+st.download_button(
+    "Download Analysis (Excel)",
+    data=buffer.getvalue(),
+    file_name="qsr_mvp_analysis.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
