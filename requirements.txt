@@ -1,0 +1,10 @@
+spacy
+pandas
+streamlit
+fastapi
+uvicorn
+redis
+openai
+langchain
+faiss-cpu
+tiktoken
