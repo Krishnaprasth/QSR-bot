@@ -2,4 +2,3 @@ streamlit
 langchain
 openai
 pandas
-sqlite3
