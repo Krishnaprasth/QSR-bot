@@ -5,7 +5,9 @@ from spacy.pipeline import EntityRuler
 def create_nlp():
     nlp = spacy.blank("en")
     ruler = nlp.add_pipe("entity_ruler")
+
     patterns = [
+        # METRICS
         {"label":"METRIC","pattern":"Net Sales"},
         {"label":"METRIC","pattern":"COGS (food +packaging)"},
         {"label":"METRIC","pattern":"store Labor Cost"},
@@ -17,18 +19,22 @@ def create_nlp():
         {"label":"METRIC","pattern":"Other opex expenses"},
         {"label":"METRIC","pattern":"Gross Margin"},
         {"label":"METRIC","pattern":"Outlet EBITDA"},
-        {"label":"STORE","pattern":[{"TEXT":{"REGEX":"^[A-Z]{3,4}$"}}]},
+
+        # STORE codes (3–4 uppercase letters)
+        {"label":"STORE","pattern":[{"TEXT":{"REGEX":"^[A-Z]{3,4}$"}}]}
     ]
-    months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    for m in months:
-        patterns.append({
-            "label":"PERIOD",
-            "pattern":[{"TEXT":m}, {"TEXT":{"REGEX":"^[0-9]{4}$"}}]
-        })
-    patterns.append({
-        "label":"PERIOD",
-        "pattern":[{"TEXT":{"REGEX":"^[0-9]{4}-[0-9]{2}$"}}]
-    })
+
+    # PERIOD: both “Nov 2024” and “2021-Apr” and ISO “2024-11”
+    months = "|".join(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])
+    patterns += [
+        # “Nov 2024”
+        {"label":"PERIOD","pattern":[{"TEXT":{"REGEX":f"^({months})$"}},{"TEXT":{"REGEX":"^[0-9]{4}$"}}]},
+        # “2024-11”
+        {"label":"PERIOD","pattern":[{"TEXT":{"REGEX":"^[0-9]{4}-[0-9]{2}$"}}]},
+        # “2021-Apr”
+        {"label":"PERIOD","pattern":[{"TEXT":{"REGEX":f"^[0-9]{{4}}-({months})$"}}]},
+    ]
+
     ruler.add_patterns(patterns)
     return nlp
 
