@@ -1,65 +1,30 @@
 # QSR CEO Performance Bot
 
-This is a Streamlit-based NLP bot that helps Quick Service Restaurant (QSR) CEOs analyze store-level performance from a cleaned dataset of FY22 to FY26.
+A hybrid NLP + structured query bot for Quick Service Restaurant store metrics.
 
----
+## Setup
 
-## 📁 Included Files
-
-- `app.py`: Main Streamlit app with logic-based and NLP-based answering
-- `preload_questions.py`: Pre-generates 10,000+ CEO-style performance queries and embeds them into ChromaDB
-- `requirements.txt`: All necessary Python libraries
-- `QSR_CEO_CLEANED_FY22_TO_FY26_FULL_FINAL.csv`: Cleaned, structured 50-month dataset
-
----
-
-## 🚀 Setup Instructions
-
-### 1. Clone the repository or unzip the folder
 ```bash
-git clone <your_repo_url>
-# or unzip qsr_ceo_bot_package.zip
-```
-
-### 2. Install dependencies
-```bash
+git clone <repo_url>
+cd qsr_ceo_bot
 pip install -r requirements.txt
+python -m spacy download en_core_web_sm
 ```
 
-### 3. Add your OpenAI API Key
-Create a file at `.streamlit/secrets.toml` with this content:
-```toml
-OPENAI_API_KEY = "your-api-key-here"
-```
+## Files
 
-### 4. (Optional) Preload NLP Questions into ChromaDB
-```bash
-python preload_questions.py
-```
+- `nlp_pipeline.py`: spaCy-based intent & entity extraction.
+- `query_planner.py`: Data loading and query-handling functions.
+- `app.py`: Streamlit UI for interactive Q&A.
+- `requirements.txt`: Python dependencies.
+- `README.md`: Project overview and instructions.
 
-### 5. Run the App
+## Usage
+
+Run the Streamlit app:
+
 ```bash
 streamlit run app.py
 ```
 
----
-
-## 🧠 Capabilities
-
-- Logic-driven analysis for Net Sales, EBITDA, Rent, etc.
-- Natural language understanding (via GPT-4 fallback)
-- Vector semantic search using ChromaDB
-- Supports 50-months of data across 100+ stores and 30+ metrics
-
----
-
-## ✅ Example Questions
-
-- "What is the Net Sales trend for store KOR in FY24?"
-- "Top 5 stores by EBITDA in FY25?"
-- "What was the Rent-to-Sales ratio for BTM in FY23?"
-- "Which store had the highest COGS in FY26?"
-
----
-
-Built with ❤️ to empower data-driven restaurant leadership.
+Then upload your `sales_data.csv` and start asking performance questions!
