@@ -1,4 +1,5 @@
 import os
+import json
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -34,7 +35,7 @@ if st.button("Send") and question:
     st.session_state.messages.append({"role": "user", "content": question})
     st.session_state.history.append(("You", question))
 
-    # **NEW**: use the v1 client endpoint
+    # Use the v1 client endpoint
     response = openai.chat.completions.create(
         model="gpt-4-0613",
         messages=st.session_state.messages,
@@ -54,15 +55,21 @@ if st.button("Send") and question:
         function_call={"name": "run_query"},
     )
 
-    msg = response.choices[0].message
-    if msg.get("function_call"):
-        code = msg["function_call"]["arguments"]["code"]
+    choice = response.choices[0]
+    message = choice.message
+    # Check for a function call
+    func_call = getattr(message, "function_call", None)
+    if func_call:
+        # Parse the JSON arguments to get the code
+        args = json.loads(func_call.arguments)
+        code = args.get("code", "")
         local_vars = {"df": df}
         try:
             exec(code, {}, local_vars)
             result = local_vars.get("result", "✅ Ran code but no `result` returned.")
         except Exception as e:
             result = f"❌ Error running code: {e}"
+        # Add the function response back into the chat context
         st.session_state.messages.append({
             "role": "function",
             "name": "run_query",
@@ -70,7 +77,8 @@ if st.button("Send") and question:
         })
         st.session_state.history.append(("GPT", result))
     else:
-        answer = msg.get("content", "")
+        # No function call? Just a plain assistant reply
+        answer = message.content
         st.session_state.messages.append({"role": "assistant", "content": answer})
         st.session_state.history.append(("GPT", answer))
 
