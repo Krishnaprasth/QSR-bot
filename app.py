@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 
-from langchain.llms import OpenAI
+# ← direct import avoids langchain_community
+from langchain.llms.openai import OpenAI
 from langchain.agents import initialize_agent
 from langchain.agents.agent_toolkits import PandasToolkit
 
