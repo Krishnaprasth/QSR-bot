@@ -2,10 +2,19 @@ import pandas as pd
 import re
 
 def load_data(input_data):
+    # 1) Read raw
     if isinstance(input_data, pd.DataFrame):
         df_raw = input_data.copy()
     else:
         df_raw = pd.read_csv(input_data)
+
+    # 2) Parse hyphenated months like "2021-Apr" into datetime,
+    #    then stringify back to the exact same format for consistency
+    df_raw["Month"] = pd.to_datetime(
+        df_raw["Month"], format="%Y-%b", errors="coerce"
+    ).dt.strftime("%Y-%b")
+
+    # 3) Pivot & derive KPIs
     df = (
         df_raw
         .pivot_table(index=["Month","Store"], columns="Metric", values="Amount")
@@ -44,20 +53,24 @@ def rank_metric_for_period(df, metric, period, ascending=False):
     return sub.sort_values(metric, ascending=ascending)[["Store", metric]]
 
 def handle_query(intent, slots, df):
-    intent = intent or "UNKNOWN"
     raw = slots.get("RAW_TEXT", "")
+    # MAX
     if intent == "MAX_METRIC":
         store, val = max_metric_for_month(df, slots["METRIC"], slots["PERIOD"])
         return f"🏆 {store} had the highest {slots['METRIC']} in {slots['PERIOD']}: {val:.2f} lakhs"
+    # TREND
     if intent == "TREND":
         ts = trend_for_store_metric(df, slots["STORE"], slots["METRIC"])
         return ts.to_string(index=False)
+    # COMPARE
     if intent == "COMPARE":
-        stores = [s.strip() for s in slots["STORE"].split(",")]
-        res = compare_metric(df, slots["METRIC"], stores[0], stores[1], slots["PERIOD"])
+        s1, s2 = [s.strip() for s in slots["STORE"].split(",")]
+        res = compare_metric(df, slots["METRIC"], s1, s2, slots["PERIOD"])
         return res
+    # RANK
     if intent == "RANK":
         asc = bool(re.search(r"\b(ascend|lowest)\b", raw.lower()))
         ranked = rank_metric_for_period(df, slots["METRIC"], slots["PERIOD"], ascending=asc)
         return ranked.to_markdown(index=False)
+    # FALLBACK
     return "Sorry, I couldn't handle that query."
