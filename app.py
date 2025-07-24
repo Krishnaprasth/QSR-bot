@@ -1,17 +1,13 @@
-import os
-import json
+import os, json, sqlite3
 import streamlit as st
 import pandas as pd
-import sqlite3
 import openai
 
-# Configure your OpenAI key
+# 0) Config
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
 st.set_page_config(page_title="QSR CEO Data‑Chat Bot", layout="wide")
-st.title("🗄️ QSR CEO Data‑Chat Bot")
 
-# Load data once
+# 1) Load data
 @st.cache_data
 def load_data():
     conn = sqlite3.connect("sales_data.db")
@@ -21,107 +17,103 @@ def load_data():
 
 df = load_data()
 
-# --- Sidebar UI ---
+# 2) Init session state
+st.session_state.setdefault("questions", [])
+st.session_state.setdefault("chat_history", [])
+
+# 3) Sidebar
 with st.sidebar:
     st.header("📜 Past Questions")
-    if "history" in st.session_state and st.session_state.history:
-        for who, content in st.session_state.history:
-            if who == "You":
-                st.markdown(f"- {content}")
+    if st.session_state.questions:
+        for q in st.session_state.questions:
+            st.markdown(f"- {q}")
     else:
         st.markdown("_No questions yet_")
+
     st.markdown("---")
-    st.download_button(
-        label="⬇️ Download Full Data as CSV",
-        data=df.to_csv(index=False).encode('utf-8'),
-        file_name="sales_data.csv",
-        mime="text/csv"
-    )
+    # Download full CSV
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button("⬇️ Download Full Data as CSV", csv_bytes, "sales_data.csv", "text/csv")
 
-# Initialize conversation state
-if "messages" not in st.session_state:
-    st.session_state.messages = [{
-        "role": "system",
-        "content": """
-You are a QSR data expert. The pandas DataFrame `df` has columns:
-  - Month (YYYY-MMM), Store, Metric, Amount
-Return your answer by assigning the final output to `result`.  
-If result is a DataFrame or Series, I'll render it as a table or chart.
-""".strip()
-    }]
-if "history" not in st.session_state:
-    st.session_state.history = []
+    st.markdown("---")
+    # Clear history button
+    if st.button("🗑️ Clear History"):
+        st.session_state.questions.clear()
+        st.session_state.chat_history.clear()
+        st.experimental_rerun()
 
-# Main chat input
+# 4) Main chat interface
+st.title("🗄️ QSR CEO Data‑Chat Bot")
 question = st.text_input("Ask a question about your store data:")
 if st.button("Send") and question:
-    st.session_state.messages.append({"role":"user","content":question})
-    st.session_state.history.append(("You", question))
+    st.session_state.questions.append(question)
+    st.session_state.chat_history.append({"user": question, "bot": None})
 
-    # Call GPT‑4 with function‑calling
-    response = openai.chat.completions.create(
+    messages = [
+        {"role": "system", "content": """
+You are a QSR data expert. The DataFrame `df` has columns:
+  • Month (YYYY-MMM)  
+  • Store (e.g. IND, KOR)  
+  • Metric (e.g. Net Sales, COGS …)  
+  • Amount (numeric)  
+
+When asked for “sales”, filter for Metric=="Net Sales".  
+For SSG in a single FY, build prior/current windows, sum, then compute growth.  
+Assign final answer to variable `result`.
+""".strip()},
+        {"role": "user", "content": question}
+    ]
+
+    resp = openai.chat.completions.create(
         model="gpt-4-0613",
-        messages=st.session_state.messages,
+        messages=messages,
         functions=[{
             "name": "run_query",
             "description": "Execute pandas code on df and return result",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {"type":"string","description":"pandas code that defines `result`"}
+                    "code": {"type": "string", "description": "pandas code that sets `result`"}
                 },
-                "required":["code"]
+                "required": ["code"]
             }
         }],
-        function_call={"name":"run_query"}
+        function_call={"name": "run_query"},
     )
 
-    choice = response.choices[0]
-    msg = choice.message
-    func_call = getattr(msg, "function_call", None)
-
-    if func_call:
-        args = json.loads(func_call.arguments)
-        code = args.get("code","")
+    choice = resp.choices[0].message
+    fc = getattr(choice, "function_call", None)
+    if fc:
+        args = json.loads(fc.arguments)
+        code = args.get("code", "")
         local = {"df": df}
         try:
             exec(code, {}, local)
-            result = local.get("result", None)
+            bot_result = local.get("result", None)
         except Exception as e:
-            result = f"❌ Error running code: {e}"
-        # Append the function result back
-        st.session_state.messages.append({
-            "role":"function",
-            "name":"run_query",
-            "content": str(result)
-        })
-        st.session_state.history.append(("GPT", result))
+            bot_result = f"❌ Error running code: {e}"
     else:
-        # Plain assistant reply
-        answer = msg.content or ""
-        st.session_state.messages.append({"role":"assistant","content":answer})
-        st.session_state.history.append(("GPT", answer))
+        bot_result = choice.content or ""
 
-# Render chat + rich outputs
-for who, content in st.session_state.history:
-    if who == "You":
-        st.markdown(f"**You:** {content}")
+    st.session_state.chat_history[-1]["bot"] = bot_result
+
+# 5) Render chat history
+for turn in st.session_state.chat_history:
+    st.markdown(f"**You:** {turn['user']}")
+    st.markdown("**GPT:**")
+    res = turn["bot"]
+    if isinstance(res, pd.DataFrame):
+        st.dataframe(res, use_container_width=True)
+    elif isinstance(res, pd.Series):
+        st.line_chart(res)
+    elif isinstance(res, list) and all(isinstance(x, dict) for x in res):
+        st.dataframe(pd.DataFrame(res), use_container_width=True)
     else:
-        st.markdown(f"**GPT:**")
-        # Rich rendering based on type
-        if isinstance(content, pd.DataFrame):
-            st.dataframe(content, use_container_width=True)
-        elif isinstance(content, pd.Series):
-            st.line_chart(content)
-        elif isinstance(content, list) and all(isinstance(x, dict) for x in content):
-            st.dataframe(pd.DataFrame(content), use_container_width=True)
-        else:
-            # Try JSON→DataFrame
-            try:
-                obj = json.loads(content)
-                if isinstance(obj, list):
-                    st.dataframe(pd.DataFrame(obj), use_container_width=True)
-                    continue
-            except:
-                pass
-            st.markdown(f"{content}")
+        try:
+            j = json.loads(res)
+            if isinstance(j, list):
+                st.dataframe(pd.DataFrame(j), use_container_width=True)
+                continue
+        except:
+            pass
+        st.markdown(res)
