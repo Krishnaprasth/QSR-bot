@@ -1,9 +1,27 @@
+# query_planner.py
+
 import pandas as pd
 
-def load_data(path="sales_data.csv"):
-    df = pd.read_csv(path)
-    df = df.pivot_table(index=["Month","Store"], columns="Metric", values="Amount").reset_index()
-    # Derived KPIs
+def load_data(input_data):
+    """
+    Accepts either:
+      - a pandas.DataFrame (already read), or
+      - a file‐like buffer / file‑path for CSV.
+    Returns the pivoted DataFrame with derived KPIs.
+    """
+    if isinstance(input_data, pd.DataFrame):
+        df_raw = input_data.copy()
+    else:
+        df_raw = pd.read_csv(input_data)
+
+    # pivot metrics into columns
+    df = (
+        df_raw
+        .pivot_table(index=["Month","Store"], columns="Metric", values="Amount")
+        .reset_index()
+    )
+
+    # compute derived KPIs
     df["Gross Margin"] = df["Net Sales"] - df["COGS (food +packaging)"]
     df["Outlet EBITDA"] = (
         df["Gross Margin"]
@@ -15,6 +33,7 @@ def load_data(path="sales_data.csv"):
         - df["Marketing & advertisement"]
         - df["Other opex expenses"]
     )
+
     return df
 
 def max_metric_for_month(df, metric, period):
@@ -28,19 +47,19 @@ def trend_for_store_metric(df, store, metric):
 
 def compare_metric(df, metric, store1, store2, period):
     sub = df[df["Month"] == period]
-    v1 = sub[sub["Store"] == store1][metric].squeeze()
-    v2 = sub[sub["Store"] == store2][metric].squeeze()
+    v1 = sub.loc[sub["Store"] == store1, metric].squeeze()
+    v2 = sub.loc[sub["Store"] == store2, metric].squeeze()
     return {store1: v1, store2: v2}
 
 def handle_query(intent, slots, df):
     if intent == "MAX_METRIC":
-        store, val = max_metric_for_month(df, slots["METRIC"], slots["PERIOD"])
-        return f"🏆 {store} had the highest {slots['METRIC']} in {slots['PERIOD']}: {val:.2f} lakhs"
+        store, val = max_metric_for_month(df, slots.get("METRIC"), slots.get("PERIOD"))
+        return f"🏆 {store} had the highest {slots.get('METRIC')} in {slots.get('PERIOD')}: {val:.2f} lakhs"
     if intent == "TREND":
-        ts = trend_for_store_metric(df, slots["STORE"], slots["METRIC"])
+        ts = trend_for_store_metric(df, slots.get("STORE"), slots.get("METRIC"))
         return ts.to_string(index=False)
     if intent == "COMPARE":
-        stores = [s.strip() for s in slots["STORE"].split(",")]
-        res = compare_metric(df, slots["METRIC"], stores[0], stores[1], slots["PERIOD"])
+        stores = [s.strip() for s in slots.get("STORE","").split("vs")]
+        res = compare_metric(df, slots.get("METRIC"), stores[0], stores[1], slots.get("PERIOD"))
         return res
-    return "Sorry, I couldn't handle that query."
+    return "Sorry, I couldn't understand or handle that query."
