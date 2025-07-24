@@ -22,7 +22,6 @@ df = load_data()
 
 # 3) Conversation state
 if "messages" not in st.session_state:
-    # System prompt to guide the assistant
     st.session_state.messages = [
         {"role": "system", "content": "You are a QSR data expert. Use python/pandas to answer."}
     ]
@@ -32,12 +31,11 @@ if "history" not in st.session_state:
 # 4) User input
 question = st.text_input("Ask a question about your store data:")
 if st.button("Send") and question:
-    # Append user question
     st.session_state.messages.append({"role": "user", "content": question})
     st.session_state.history.append(("You", question))
 
-    # Call ChatGPT with function schema
-    response = openai.ChatCompletion.create(
+    # **NEW**: use the v1 client endpoint
+    response = openai.chat.completions.create(
         model="gpt-4-0613",
         messages=st.session_state.messages,
         functions=[
@@ -57,17 +55,14 @@ if st.button("Send") and question:
     )
 
     msg = response.choices[0].message
-    # If GPT decided to call our function
     if msg.get("function_call"):
         code = msg["function_call"]["arguments"]["code"]
-        # Safely exec the code
         local_vars = {"df": df}
         try:
             exec(code, {}, local_vars)
             result = local_vars.get("result", "✅ Ran code but no `result` returned.")
         except Exception as e:
             result = f"❌ Error running code: {e}"
-        # Append function result back into the conversation
         st.session_state.messages.append({
             "role": "function",
             "name": "run_query",
@@ -75,7 +70,6 @@ if st.button("Send") and question:
         })
         st.session_state.history.append(("GPT", result))
     else:
-        # Fallback: GPT answered without function call
         answer = msg.get("content", "")
         st.session_state.messages.append({"role": "assistant", "content": answer})
         st.session_state.history.append(("GPT", answer))
