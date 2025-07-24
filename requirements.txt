@@ -1,0 +1,7 @@
+spacy
+pandas
+streamlit
+openai
+faiss-cpu
+langchain
+tiktoken
