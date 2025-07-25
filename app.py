@@ -1,67 +1,80 @@
-import os
-import json
-import sqlite3
+# app.py - Updated version with auto-loading data
 import streamlit as st
 import pandas as pd
-import openai
+import numpy as np
+from openai import OpenAI
+import anthropic
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import json
+import os
+from dotenv import load_dotenv
 
-# 0) Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")
-st.set_page_config(page_title="QSR CEO Data‑Chat Bot", layout="wide")
+# Load environment variables
+load_dotenv()
 
-# 1) Load Data
+# Page config
+st.set_page_config(
+    page_title="AI Sales Analytics Bot",
+    page_icon="🤖",
+    layout="wide"
+)
+
+# Initialize session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+if 'data' not in st.session_state:
+    st.session_state.data = None
+
+# Auto-load sales data
 @st.cache_data
-def load_data():
-    conn = sqlite3.connect("sales_data.db")
-    df = pd.read_sql_query("SELECT * FROM sales", conn)
-    conn.close()
-    return df
+def load_sales_data():
+    try:
+        df = pd.read_csv('sales_data.csv')
+        # Add calculated columns
+        df['Year'] = df['Month'].str.split('-').str[0].astype(int)
+        df['MonthName'] = df['Month'].str.split('-').str[1]
+        # Add GST calculations
+        df['IsOnline'] = df['Store'].str.contains('ONLINE|WEB|APP', case=False, na=False)
+        df['GSTRate'] = df['IsOnline'].apply(lambda x: 0 if x else 0.05)
+        df['GSTAmount'] = df.apply(lambda row: row['Amount'] * row['GSTRate'] 
+                                   if row['Metric'] in ['Gross Sales', 'Net Sales'] else 0, axis=1)
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
 
-df = load_data()
+# Load data on startup
+if st.session_state.data is None:
+    st.session_state.data = load_sales_data()
 
-# 2) Session State
-st.session_state.setdefault("questions", [])
-st.session_state.setdefault("chat_history", [])
-
-# 3) Sidebar
+# Sidebar for configuration
 with st.sidebar:
-    st.header("📜 Past Questions")
-    if st.session_state.questions:
-        for q in st.session_state.questions:
-            st.markdown(f"- {q}")
+    st.title("⚙️ Configuration")
+    
+    # Show data status
+    if st.session_state.data is not None:
+        st.success(f"✅ Data Loaded: {len(st.session_state.data):,} rows")
+        with st.expander("Data Info"):
+            df = st.session_state.data
+            st.write(f"**Date Range:** {df['Month'].min()} to {df['Month'].max()}")
+            st.write(f"**Stores:** {df['Store'].nunique()}")
+            st.write(f"**Metrics:** {', '.join(df['Metric'].unique()[:5])}...")
+    
+    st.markdown("---")
+    
+    # API Provider selection
+    api_provider = st.selectbox(
+        "Select AI Provider",
+        ["OpenAI (GPT-4)", "Anthropic (Claude)"]
+    )
+    
+    # API Key input
+    if api_provider == "OpenAI (GPT-4)":
+        api_key = st.text_input("OpenAI API Key", type="password", value=os.getenv("OPENAI_API_KEY", ""))
     else:
-        st.markdown("_No questions yet_")
-    st.markdown("---")
-    csv_bytes = df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download Full Data as CSV", csv_bytes, "sales_data.csv", "text/csv")
-    st.markdown("---")
-    if st.button("🗑️ Clear History"):
-        st.session_state.questions.clear()
-        st.session_state.chat_history.clear()
-        st.experimental_rerun()
+        api_key = st.text_input("Anthropic API Key", type="password", value=os.getenv("ANTHROPIC_API_KEY", ""))
 
-# 4) Main Chat
-st.title("🗄️ QSR CEO Data‑Chat Bot")
-question = st.text_input("Ask a question about your store data:")
-if st.button("Send") and question:
-    st.session_state.questions.append(question)
-    st.session_state.chat_history.append({"user": question, "bot": None})
-
-    # **Enhanced system prompt**:
-    messages = [
-        {"role": "system", "content": """
-You are a QSR data expert. The pandas DataFrame `df` has columns:
-  • Month (YYYY-MMM)  
-  • Store (e.g. IND, KOR)  
-  • Metric (e.g. Net Sales, COGS, etc.)  
-  • Amount (numeric)
-
-**Important rules**:
-1. Treat “revenue” or “sales” or “net revenue” **all** as `Metric == "Net Sales"`.  
-2. Normalize user periods like “Nov 24” → `"2024-Nov"`, “Dec 25” → `"2025-Dec"`.  
-3. When asked “max revenue in XXX”, always:
-   ```python
-   temp = df[df["Metric"] == "Net Sales"]
-   subset = temp[temp["Month"] == "<YYYY-MMM>"]
-   store = subset.loc[subset["Amount"].idxmax(), "Store"]
-   result = store
+# Rest of the app.py code remains the same...
+# (Copy the rest from the original app.py artifact)
