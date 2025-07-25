@@ -1,3 +1,5 @@
+.env
 __pycache__/
 *.pyc
-.env
+.streamlit/
+# Remove the *.csv line to allow CSV files
