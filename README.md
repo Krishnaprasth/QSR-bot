@@ -1,24 +1,11 @@
-# QSR CEO Data‑Chat Bot
+# AI Sales Analytics Bot
 
-A Streamlit app that loads sales data from a SQLite database and lets you chat with GPT over the data.
+## How to Use
+1. Add your OpenAI/Claude API key in the sidebar
+2. Ask questions like:
+   - "How many stores lost money in FY25?"
+   - "Calculate SSG"
+   - "Show top performing stores"
 
-## Files
-
-- `sales_data.csv`: Source CSV (for reference).
-- `sales_data.db`: SQLite database table `sales` generated from the CSV.
-- `init_db.py`: Script to create/update `sales_data.db` from the CSV.
-- `app.py`: Streamlit application using LangChain to chat with the data.
-- `requirements.txt`: Python dependencies.
-- `.gitignore`: Files to exclude from Git.
-
-## Setup
-
-```bash
-git clone <repo_url>
-cd streamlit_sql_app
-pip install -r requirements.txt
-python init_db.py
-streamlit run app.py
-```
-
-Ensure `OPENAI_API_KEY` is set in your environment.
+## Deploy
+Deploy directly to Streamlit Cloud - add API key in secrets.
