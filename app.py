@@ -1,43 +1,131 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+import io
+from openai import OpenAI
+from kpi import generate_report, generate_vintage_report, split_online_offline
+from utils import load_data
 
-st.set_page_config(page_title="Sales Analytics Bot", layout="wide")
+# 1) Load data once
+@st.experimental_singleton
+def get_data():
+    return load_data("data/sales_data.csv")
+df = get_data()
 
-# Load data
-@st.cache_data
-def load_data():
-    return pd.read_csv('sales_data.csv')
+# 2) Define function-calling schemas
+functions = [
+    {
+        "name": "generate_report",
+        "description": "Full performance report for a store and FY",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "store": {"type": "string"},
+                "fy":    {"type": "string"}
+            },
+            "required": ["store","fy"]
+        }
+    },
+    {
+        "name": "generate_vintage_report",
+        "description": "KPI comparison for New/Emerging/Established stores",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fy": {"type":"string"}
+            },
+            "required": ["fy"]
+        }
+    },
+    {
+        "name": "split_online_offline",
+        "description": "Infer offline vs online sales by stripping 5% GST",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "net_sales":  {"type":"number"},
+                "gst_amount": {"type":"number"}
+            },
+            "required": ["net_sales","gst_amount"]
+        }
+    }
+]
 
-data = load_data()
+# 3) Initialize OpenAI client
+openai = OpenAI()
 
-st.title("🤖 Sales Analytics Bot")
-st.write(f"Loaded {len(data):,} rows of sales data")
+# 4) Chat UI
+st.title("QSR CEO Bot")
 
-# Chat interface
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+query = st.text_input("Ask me about your QSR data")
+if st.button("Send") and query:
+    messages = [{"role":"system","content":"You are a QSR financial analyst. Use the available functions when possible."}]
+    messages += [{"role":r, "content":c} for r,c in st.session_state.history]
+    messages += [{"role":"user","content":query}]
 
-if prompt := st.chat_input("Ask about your sales data..."):
-    st.chat_message("user").write(prompt)
-    
-    with st.chat_message("assistant"):
-        # Analyze based on keywords
-        if "highest sales" in prompt.lower() and "march 2025" in prompt.lower():
-            march_data = data[(data['Month'] == '2025-Mar') & (data['Metric'] == 'Gross Sales')]
-            store_sales = march_data.groupby('Store')['Amount'].sum().sort_values(ascending=False)
-            
-            if len(store_sales) > 0:
-                response = f"**{store_sales.index[0]}** had the highest sales in March 2025 with ₹{store_sales.iloc[0]:.2f} Lakhs"
-            else:
-                response = "No sales data found for March 2025"
+    resp = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        functions=functions,
+        function_call="auto"
+    )
+    msg = resp.choices[0].message
+
+    if msg.get("function_call"):
+        name, args = msg.function_call.name, msg.function_call.arguments
+
+        if name == "generate_report":
+            report = generate_report(**args)
+            st.markdown("## Executive Summary")
+            st.write(report["executive_summary"])
+            st.markdown("## KPI Table")
+            st.table(pd.DataFrame(report["kpi_table"]))
+            st.markdown("## Cost Ratios")
+            st.table(pd.DataFrame(report["cost_ratio_table"]))
+            st.markdown("## SSSG Detail")
+            st.json(report["sssg"])
+            st.markdown("## Sales Trend")
+            fig, ax = plt.subplots()
+            ax.plot(report["trend"]["months"], report["trend"]["values"], marker="o")
+            st.pyplot(fig)
+            answer = f"Generated full report for {args['store']} in {args['fy']}."
+
+        elif name == "generate_vintage_report":
+            rows = generate_vintage_report(**args)
+            df_v = pd.DataFrame(rows)
+            st.markdown(f"## Vintage Report — {args['fy']}")
+            st.table(df_v)
+            buf = io.BytesIO()
+            with PdfPages(buf) as pdf:
+                fig, ax = plt.subplots(figsize=(8,3))
+                ax.axis("off")
+                tbl = ax.table(cellText=df_v.values, colLabels=df_v.columns, loc="center")
+                pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
+            st.download_button("Download Vintage Report (PDF)", buf.getvalue(), file_name=f"vintage_{args['fy']}.pdf")
+            answer = f"Generated vintage report for {args['fy']}."
+
+        elif name == "split_online_offline":
+            res = split_online_offline(**args)
+            st.json(res)
+            answer = (
+                f"Offline (ex‑GST): ₹{res['offline_sales']} Lakhs, "
+                f"Online: ₹{res['online_sales']} Lakhs (GST: ₹{res['gst_amount']})."
+            )
+
         else:
-            response = "I can analyze: highest sales by month, store performance, metrics comparison, etc."
-        
-        st.write(response)
-    
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.session_state.messages.append({"role": "assistant", "content": response})
+            answer = "Sorry, I don't know how to run that function."
+
+    else:
+        answer = msg.content
+
+    st.session_state.history.append(("assistant", answer))
+    st.session_state.history.append(("user", query))
+
+for role, text in st.session_state.history:
+    if role=="user":
+        st.markdown(f"**Q:** {text}")
+    else:
+        st.markdown(f"**A:** {text}")

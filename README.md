@@ -1,11 +1,31 @@
-# AI Sales Analytics Bot
+# QSR CEO Bot
 
-## How to Use
-1. Add your OpenAI/Claude API key in the sidebar
-2. Ask questions like:
-   - "How many stores lost money in FY25?"
-   - "Calculate SSG"
-   - "Show top performing stores"
+A GPT-4o-powered Streamlit app for on-demand financial and operational reporting of your QSR chain.
 
-## Deploy
-Deploy directly to Streamlit Cloud - add API key in secrets.
+## Setup
+
+1. Clone the repo:
+   ```bash
+   git clone <repo-url>
+   cd qsr-ceo-bot
+   ```
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Add your data CSV to `data/sales_data.csv`.
+4. Set your OpenAI API key:
+   - Locally: `export OPENAI_API_KEY="sk-..."`
+   - Streamlit Cloud: in **Settings → Secrets**.
+
+## Usage
+
+- **Generate a full report**: “Generate report for HSR in FY 2024-25”
+- **Vintage report**: “Generate vintage report for FY 2024-25”
+- **Channel split**: “Show online vs offline split”
+
+GPT will call underlying functions and render tables, charts, or PDFs.
+
+## CI/CD
+
+GitHub Actions runs lint and smoke tests on each push.
