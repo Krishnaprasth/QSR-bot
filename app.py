@@ -3,16 +3,17 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 from openai import OpenAI
-from kpi import generate_report, generate_vintage_report, split_online_offline
+from kpi import (
+    generate_report,
+    generate_vintage_report,
+    split_online_offline
+)
 from utils import load_data
 
-# 1) Load data once
-@st.experimental_singleton
-def get_data():
-    return load_data("data/sales_data.csv")
-df = get_data()
+# Load data with fallback uploader
+df = load_data("data/sales_data.csv")
 
-# 2) Define function-calling schemas
+# Function-calling schemas
 functions = [
     {
         "name": "generate_report",
@@ -51,20 +52,20 @@ functions = [
     }
 ]
 
-# 3) Initialize OpenAI client
+# Initialize OpenAI client
 openai = OpenAI()
 
-# 4) Chat UI
+# Streamlit Chat UI
 st.title("QSR CEO Bot")
-
 if "history" not in st.session_state:
     st.session_state.history = []
 
 query = st.text_input("Ask me about your QSR data")
 if st.button("Send") and query:
     messages = [{"role":"system","content":"You are a QSR financial analyst. Use the available functions when possible."}]
-    messages += [{"role":r, "content":c} for r,c in st.session_state.history]
-    messages += [{"role":"user","content":query}]
+    for role, text in st.session_state.history:
+        messages.append({"role": role, "content": text})
+    messages.append({"role":"user","content":query})
 
     resp = openai.chat.completions.create(
         model="gpt-4o",
@@ -78,7 +79,7 @@ if st.button("Send") and query:
         name, args = msg.function_call.name, msg.function_call.arguments
 
         if name == "generate_report":
-            report = generate_report(**args)
+            report = generate_report(df, **args)
             st.markdown("## Executive Summary")
             st.write(report["executive_summary"])
             st.markdown("## KPI Table")
@@ -91,21 +92,23 @@ if st.button("Send") and query:
             fig, ax = plt.subplots()
             ax.plot(report["trend"]["months"], report["trend"]["values"], marker="o")
             st.pyplot(fig)
-            answer = f"Generated full report for {args['store']} in {args['fy']}."
+            answer = f"Generated full report for **{args['store']}** in **{args['fy']}**."
 
         elif name == "generate_vintage_report":
-            rows = generate_vintage_report(**args)
+            rows = generate_vintage_report(df, **args)
             df_v = pd.DataFrame(rows)
-            st.markdown(f"## Vintage Report — {args['fy']}")
+            st.markdown(f"## Vintage Report — **{args['fy']}**")
             st.table(df_v)
             buf = io.BytesIO()
+            from matplotlib.backends.backend_pdf import PdfPages
             with PdfPages(buf) as pdf:
                 fig, ax = plt.subplots(figsize=(8,3))
                 ax.axis("off")
                 tbl = ax.table(cellText=df_v.values, colLabels=df_v.columns, loc="center")
-                pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
+                pdf.savefig(fig, bbox_inches="tight")
+                plt.close(fig)
             st.download_button("Download Vintage Report (PDF)", buf.getvalue(), file_name=f"vintage_{args['fy']}.pdf")
-            answer = f"Generated vintage report for {args['fy']}."
+            answer = f"Generated vintage report for **{args['fy']}**."
 
         elif name == "split_online_offline":
             res = split_online_offline(**args)
@@ -114,10 +117,8 @@ if st.button("Send") and query:
                 f"Offline (ex‑GST): ₹{res['offline_sales']} Lakhs, "
                 f"Online: ₹{res['online_sales']} Lakhs (GST: ₹{res['gst_amount']})."
             )
-
         else:
-            answer = "Sorry, I don't know how to run that function."
-
+            answer = "Sorry—I don't know how to run that function."
     else:
         answer = msg.content
 
@@ -125,7 +126,7 @@ if st.button("Send") and query:
     st.session_state.history.append(("user", query))
 
 for role, text in st.session_state.history:
-    if role=="user":
+    if role == "user":
         st.markdown(f"**Q:** {text}")
     else:
         st.markdown(f"**A:** {text}")
