@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import io
+import json
 from openai import OpenAI
 from kpi import (
     generate_report,
     generate_vintage_report,
     split_online_offline,
-    get_revenue_breakup_by_cohort_by_fy,
-    get_top_sales_by_month
+    get_top_sales_by_month,
+    get_revenue_breakup_by_cohort_by_fy
 )
 from utils import load_data
 from intent_manager import IntentManager
@@ -99,7 +100,10 @@ if st.button("Send") and query:
 
     if getattr(msg, "function_call", None):
         name = msg.function_call.name
+        # Safely parse arguments if they come as a JSON string
         args = msg.function_call.arguments
+        if isinstance(args, str):
+            args = json.loads(args)
 
         if name == "generate_report":
             r = generate_report(df, **args)
