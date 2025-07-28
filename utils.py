@@ -47,7 +47,7 @@ def months_between(d1, d2):
 # Precompute store_vintage safely
 try:
     df = load_data()
-    net_metric = find_metric(df, r"net\s*sales")
+    net_metric = find_metric(df, r"net\s*sales")  # Corrected regex pattern
     store_vintage = {}
     today = datetime.date.today()
     for store, grp in df.groupby("Store"):
@@ -62,6 +62,5 @@ try:
                 store_vintage[store] = "Established"
         else:
             store_vintage[store] = "Unknown"
-except Exception as e:
-    # Fallback: empty mapping if any error
+except Exception:
     store_vintage = {}

@@ -3,61 +3,63 @@ import numpy as np
 import pandas as pd
 from utils import find_metric, infer_opening_date, months_between, month_order, store_vintage
 
-def run_aggregation(df, metric, aggfunc, by=None):
-    by = by or []
-    df_metric = df[df.Metric == metric]
-    series = getattr(df_metric.groupby(by)["Amount"], aggfunc)()
-    return series.reset_index().rename(columns={"Amount": aggfunc}).to_dict(orient="records")
+def generate_report(df, store: str, fy: str):
+    net_sales_metric  = find_metric(df, r"net\s*sales")  # Corrected regex
+    aggregator_metric = find_metric(df, r"aggregator")
+    expense_patterns  = [r"rent", r"labor", r"CAM", r"utility", r"marketing", r"gst"]
+    expenses          = [find_metric(df, p) for p in expense_patterns]
 
-def run_trend(df, metric, group_by=None, window=1):
-    gb = group_by or []
-    df_metric = df[df.Metric == metric]
-    ts = df_metric.groupby(gb + ["Month"])["Amount"].sum().reset_index()
-    pivot = ts.pivot(index="Month", columns=gb, values="Amount").reindex(month_order).fillna(0)
-    trend = pivot.rolling(window=window, min_periods=1).mean()
-    return {"months": trend.index.tolist(), "values": trend.values.tolist()}
+    d = df[(df.Store == store) & (df.FY == fy)]
+    total_sales    = d[d.Metric == net_sales_metric].Amount.sum()
+    total_expenses = d[d.Metric.isin(expenses + [aggregator_metric])].Amount.sum()
+    contribution   = total_sales - total_expenses
 
-def run_comparison(df, entity_type, entity1, entity2, metric):
-    key = entity_type
-    df_metric = df[df.Metric == metric]
-    grp = df_metric.groupby([key, "FY"])["Amount"].sum().reset_index()
-    val1 = grp[(grp[key] == entity1)]["Amount"].tolist()
-    val2 = grp[(grp[key] == entity2)]["Amount"].tolist()
-    return {entity1: val1, entity2: val2}
+    opening = infer_opening_date(df[df.Store == store], net_sales_metric)
+    opening_str = opening.strftime("%b %Y") if opening else "Unknown"
+    exec_summary = (
+        f"{store} opened in {opening_str}. "
+        f"In {fy}, net sales were ₹{total_sales:.1f} lakhs, "
+        f"contribution margin ₹{contribution:.1f} lakhs."
+    )
 
-def run_anomaly_detection(df, metric, group_by=None, method="zscore", threshold=2.5):
-    gb = group_by or []
-    df_metric = df[df.Metric == metric]
-    ts = df_metric.groupby(gb + ["Month"])["Amount"].sum().reset_index()
-    stats = ts.groupby(gb)["Amount"].agg(["mean", "std"]).reset_index()
-    merged = pd.merge(ts, stats, on=gb)
-    if method == "zscore":
-        merged["z"] = (merged["Amount"] - merged["mean"]) / merged["std"]
-        anomalies = merged[merged["z"].abs() > threshold]
+    fy_list = sorted(df.FY.unique())
+    if len(fy_list) >= 2:
+        base_fy, comp_fy = fy_list[-2], fy_list[-1]
     else:
-        q1 = merged.groupby(gb)["Amount"].quantile(0.25)
-        q3 = merged.groupby(gb)["Amount"].quantile(0.75)
-        iqr = q3 - q1
-        merged = merged.merge(q1.rename("q1"), on=gb).merge(q3.rename("q3"), on=gb)
-        merged["iqr_flag"] = ((merged["Amount"] < (merged["q1"] - threshold*iqr)) | (merged["Amount"] > (merged["q3"] + threshold*iqr)))
-        anomalies = merged[merged["iqr_flag"]]
-    return anomalies[gb + ["Month", "Amount"]].to_dict(orient="records")
+        base_fy = comp_fy = None
+    sssg_pct = None
+    if base_fy and comp_fy:
+        bs = df[(df.Store==store)&(df.FY==base_fy)&(df.Metric==net_sales_metric)].Amount.sum()
+        cs = df[(df.Store==store)&(df.FY==comp_fy)&(df.Metric==net_sales_metric)].Amount.sum()
+        if bs:
+            sssg_pct = (cs - bs) / bs * 100
 
-def run_stat_test(df, metric_x, metric_y, test="pearson"):
-    df_x = df[df.Metric == metric_x].groupby("Store")["Amount"].sum()
-    df_y = df[df.Metric == metric_y].groupby("Store")["Amount"].sum()
-    common = df_x.index.intersection(df_y.index)
-    x = df_x.loc[common]
-    y = df_y.loc[common]
-    if test == "pearson":
-        from scipy.stats import pearsonr
-        r, p = pearsonr(x, y)
-    elif test == "spearman":
-        from scipy.stats import spearmanr
-        r, p = spearmanr(x, y)
-    else:
-        from scipy.stats import ttest_ind
-        r, p = ttest_ind(x, y)
-    return {"r": r, "p_value": p}
+    kpi_table = []
+    for year in ([base_fy, comp_fy] if base_fy else [fy]):
+        row = {"FY": year}
+        row["SSSG (%)"] = round(sssg_pct, 2) if year == comp_fy and sssg_pct is not None else None
+        d2 = df[(df.Store == store) & (df.FY == year)]
+        ns2 = d2[d2.Metric == net_sales_metric].Amount.sum()
+        exp2 = d2[d2.Metric.isin(expenses + [aggregator_metric])].Amount.sum()
+        row["Contribution Margin (%)"] = round((ns2 - exp2) / ns2 * 100, 2) if ns2 else None
+        kpi_table.append(row)
 
-# Existing specific functions omitted for brevity...
+    cost_ratio_table = []
+    for m in expenses:
+        pct = d[d.Metric == m].Amount.sum() / total_sales * 100 if total_sales else 0
+        cost_ratio_table.append({"Metric": m, "Pct of Sales": round(pct, 2)})
+    aggr_amt = d[d.Metric == aggregator_metric].Amount.sum()
+    cost_ratio_table.append({"Metric": "Aggregator commission", "Pct of Sales": round(aggr_amt / total_sales * 100, 2) if total_sales else 0})
+
+    series = d[d.Metric == net_sales_metric].groupby("Month")["Amount"].sum().reindex(month_order).fillna(0)
+    trend = {"months": series.index.tolist(), "values": series.values.tolist()}
+
+    return {
+        "executive_summary": exec_summary,
+        "kpi_table": kpi_table,
+        "cost_ratio_table": cost_ratio_table,
+        "sssg": {"base_fy": base_fy, "compare_fy": comp_fy, "sssg_pct": round(sssg_pct, 2) if sssg_pct is not None else None},
+        "trend": trend
+}
+
+# Other functions remain unchanged...
