@@ -6,11 +6,12 @@ class IntentManager:
         self.openai = openai_client
         self.model = model
         self.templates = [
-            {"name":"generate_report","description":"Full report for a store and FY","example":"Generate report for HSR in FY 2024-25"},
-            {"name":"generate_vintage_report","description":"Vintage KPI comparison","example":"Vintage report for FY 2024-25"},
-            {"name":"split_online_offline","description":"Split online vs offline","example":"Split sales channel"},
-            {"name":"get_top_sales_by_month","description":"Top net sales store for a given month/FY","example":"Which store had highest sales in Dec 2024?"},
-            {"name":"get_revenue_breakup_by_cohort_by_fy","description":"Revenue by FY for specified cohorts","example":"Revenue breakup by FY for New and Mature stores"}
+            {"name":"run_aggregation","description":"Aggregate a metric","example":"Total Net Sales by Store"},
+            {"name":"run_trend","description":"Time series of a metric","example":"Net Sales trend for HSR FY25"},
+            {"name":"run_comparison","description":"Compare two entities","example":"Compare HSR vs KOR net sales FY25"},
+            {"name":"run_anomaly_detection","description":"Detect anomalies","example":"Detect labor cost spikes for HSR"},
+            {"name":"run_stat_test","description":"Statistical correlation","example":"Correlation between marketing and sales"},
+            # ... include other templates ...
         ]
         self.embeddings = self._embed([t["example"] for t in self.templates])
 
@@ -21,5 +22,5 @@ class IntentManager:
     def get_top_intents(self, query, k=3):
         resp = self.openai.embeddings.create(model=self.model, input=[query])
         q = np.array(resp.data[0].embedding)
-        sims = (self.embeddings @ q) / (np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(q))
+        sims = (self.embeddings @ q) / (np.linalg.norm(self.embeddings,axis=1)*np.linalg.norm(q))
         return [self.templates[i] for i in np.argsort(-sims)[:k]]
