@@ -3,7 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 from openai import OpenAI
-from kpi import generate_report, generate_vintage_report, split_online_offline
+from kpi import (
+    generate_report,
+    generate_vintage_report,
+    split_online_offline,
+    get_revenue_breakup_by_cohort_by_fy,
+    get_top_sales_by_month
+)
 from utils import load_data
 from intent_manager import IntentManager
 
@@ -42,6 +48,30 @@ functions = [
             "properties": {"net_sales": {"type": "number"}, "gst_amount": {"type": "number"}},
             "required": ["net_sales", "gst_amount"]
         }
+    },
+    {
+        "name": "get_top_sales_by_month",
+        "description": "Return the store with highest net sales for a given month and FY",
+        "parameters": {
+            "type": "object",
+            "properties": {"month": {"type": "string"}, "fy": {"type": "string"}},
+            "required": ["month", "fy"]
+        }
+    },
+    {
+        "name": "get_revenue_breakup_by_cohort_by_fy",
+        "description": "Compute total Net Sales by FY for specified store cohorts",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cohorts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of cohorts, e.g. ['New','Mature']"
+                }
+            },
+            "required": ["cohorts"]
+        }
     }
 ]
 
@@ -70,6 +100,7 @@ if st.button("Send") and query:
     if getattr(msg, "function_call", None):
         name = msg.function_call.name
         args = msg.function_call.arguments
+
         if name == "generate_report":
             r = generate_report(df, **args)
             st.markdown("## Executive Summary"); st.write(r["executive_summary"])
@@ -79,6 +110,7 @@ if st.button("Send") and query:
             st.markdown("## Sales Trend")
             fig, ax = plt.subplots(); ax.plot(r["trend"]["months"], r["trend"]["values"], marker="o"); st.pyplot(fig)
             answer = f"Report for {args['store']} in {args['fy']} generated."
+
         elif name == "generate_vintage_report":
             rows = generate_vintage_report(df, **args)
             df_v = pd.DataFrame(rows)
@@ -91,10 +123,24 @@ if st.button("Send") and query:
                 pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
             st.download_button("Download Vintage Report", buf.getvalue(), file_name=f"vintage_{args['fy']}.pdf")
             answer = f"Vintage report for {args['fy']} generated."
+
         elif name == "split_online_offline":
             res = split_online_offline(**args)
             st.json(res)
             answer = f"Offline: ₹{res['offline_sales']} Lakhs, Online: ₹{res['online_sales']} Lakhs."
+
+        elif name == "get_top_sales_by_month":
+            res = get_top_sales_by_month(df, **args)
+            answer = f"{res['store']} had the highest Net Sales in {args['month']} of {args['fy']} (₹{res['amount']:.2f} Lakhs)."
+            st.write(answer)
+
+        elif name == "get_revenue_breakup_by_cohort_by_fy":
+            data = get_revenue_breakup_by_cohort_by_fy(df, **args)
+            df_breakup = pd.DataFrame(data)
+            st.markdown("## Revenue Breakup by Cohort and FY")
+            st.table(df_breakup)
+            answer = "Here is the revenue breakup by cohort and FY."
+
         else:
             answer = "Unknown function."
     else:

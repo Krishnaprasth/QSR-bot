@@ -26,14 +26,35 @@ def infer_opening_date(store_df, net_sales_metric):
     dates = []
     for fy, grp in store_df.groupby("FY"):
         years = [int(x) for x in re.findall(r"\d{4}", fy)]
-        if len(years)!=2: continue
+        if len(years) != 2:
+            continue
         sy, ey = years
-        for month, amt in grp[grp.Metric==net_sales_metric][["Month","Amount"]].values:
+        for month, amt in grp[grp.Metric == net_sales_metric][["Month","Amount"]].values:
             mon = month_map.get(month)
-            if amt>0 and mon:
-                year = sy if mon>=4 else ey
+            if amt > 0 and mon:
+                year = sy if mon >= 4 else ey
                 dates.append(datetime.date(year, mon, 1))
     return min(dates) if dates else None
 
 def months_between(d1, d2):
-    return (d2.year - d1.year)*12 + (d2.month - d1.month)
+    return (d2.year - d1.year) * 12 + (d2.month - d1.month)
+
+# Precompute vintage
+df = load_data()
+from utils import infer_opening_date, months_between
+store_vintage = {}
+today = datetime.date.today()
+from utils import find_metric
+net_sales_metric = find_metric(df, r"net\s*sales")
+for store, grp in df.groupby("Store"):
+    opening = infer_opening_date(grp, net_sales_metric)
+    if opening:
+        age = months_between(opening, today)
+        if age <= 12:
+            store_vintage[store] = "New"
+        elif age <= 24:
+            store_vintage[store] = "Emerging"
+        else:
+            store_vintage[store] = "Established"
+    else:
+        store_vintage[store] = "Unknown"
